@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"log"
 	"strings"
@@ -51,12 +53,22 @@ func DoSthReplyOnA() error {
 `}
 )
 
+func printCode(node ast.Node) string {
+	var buf bytes.Buffer
+	fset := token.NewFileSet()
+	printer.Fprint(&buf, fset, node)
+
+	return buf.String()
+}
+
 func main() {
 	fset := token.NewFileSet()
 
 	// sample: do cycle call check
 	// imports collect imported package name as key, and dependency packages as values
+	// calls collect package's call, exported fields or func call
 	imports := make(map[string][]string)
+	calls := make(map[string]map[string][]string)
 	hasCycleImport := false
 	for _, code := range codes {
 		node, err := parser.ParseFile(fset, "", code, parser.ParseComments)
@@ -84,20 +96,30 @@ func main() {
 
 		if len(cycleImports) != 0 {
 			hasCycleImport = true
-			ast.Inspect(node, func(n ast.Node) bool {
-				// Find CallExpr
-				if caller, ok := n.(*ast.CallExpr); ok {
-					// SelectorExpr token means it is package func caller
-					if fun, ok := caller.Fun.(*ast.SelectorExpr); ok {
-						funcName := fun.Sel.Name
-						packageName := fun.X.(*ast.Ident).Name
-						fmt.Printf("[CYCLE IMPORT] function call found on pkg %s line %d: \n\t%s.%s\n", self, fset.Position(caller.Lparen).Line, packageName, funcName)
-					}
+		}
+
+		ast.Inspect(node, func(n ast.Node) bool {
+			// SelectorExpr token means it is external package caller
+			if expr, ok := n.(*ast.SelectorExpr); ok {
+				callCode := printCode(n)
+				if calls[self] == nil {
+					calls[self] = make(map[string][]string)
 				}
 
-				return true
-			})
-		}
+				pkg := expr.X.(*ast.Ident).Name
+				calls[self][pkg] = append(calls[self][pkg], callCode)
+				if len(cycleImports) != 0 {
+					for _, ci := range cycleImports {
+						fmt.Printf("[CYCLE IMPORT] function call found on pkg %s line %d: %s\n", self, fset.Position(expr.Pos()).Line, callCode)
+						if refered, exists := calls[ci][self]; exists {
+							fmt.Printf("refered pkg %s usage: %s\n", ci, refered)
+						}
+					}
+				}
+			}
+
+			return true
+		})
 	}
 
 	if hasCycleImport {
