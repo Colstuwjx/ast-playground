@@ -53,6 +53,7 @@ func DoSthReplyOnA() error {
 `}
 )
 
+// printCode print the ast node source code.
 func printCode(node ast.Node) string {
 	var buf bytes.Buffer
 	fset := token.NewFileSet()
